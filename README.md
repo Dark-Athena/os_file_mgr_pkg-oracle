@@ -1,5 +1,5 @@
 # os_file_mgr_pkg-oracle
-os file operation,solve 18c symlink directory issue(only for linux)
+os file operation,solve 18c symlink directory issue(only for linux)   
 在oracle数据库中对操作系统中的文件进行读写操作，解决18c版本禁用软链接导致utl_file及bfilename报错的问题  （目前版本只能用于linux环境，windows环境没这个问题）  
 以下功能均已在 12.2c/18c/21c 测试通过
 
