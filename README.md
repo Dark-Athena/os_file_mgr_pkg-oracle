@@ -33,5 +33,5 @@ os file operation,solve 18c symlink directory issue(only for linux)
   procedure replace_dir_path_by_real(p_dir varchar2);
 ```
 ![image](https://user-images.githubusercontent.com/25106767/144196420-529f604c-4f07-4f64-96a6-e1e83b05efbd.png)
-
-
+  
+有关18c软链接的相关文章：[【ORACLE】有关18c的一个很多文章都没提到的安全方面的变更-禁止软链接](https://a.darkathena.top/archives/18c-symlink-forbid)  
