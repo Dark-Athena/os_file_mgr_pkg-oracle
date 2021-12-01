@@ -29,6 +29,6 @@ os file operation,solve 18c symlink directory issue(only for linux)
   --使用真实路径重建数据库目录，只能在cdb会话中或者非cdb环境中运行
   procedure replace_dir_path_by_real(p_dir varchar2);
 ```
-![image](https://user-images.githubusercontent.com/25106767/144196084-fad522f0-cc64-42b0-b544-9e807f97150f.png)
+![image](https://user-images.githubusercontent.com/25106767/144196420-529f604c-4f07-4f64-96a6-e1e83b05efbd.png)
 
 
