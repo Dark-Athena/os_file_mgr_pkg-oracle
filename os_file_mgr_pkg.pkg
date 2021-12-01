@@ -1,0 +1,207 @@
+create or replace package os_file_mgr_pkg is
+
+  -- Author  : DarkAthena (darkathena@qq.com)                
+  -- Created : 2021/11/30 15:42:29
+  -- Purpose : os file operation,solve 18c symlink directory issue(only for linux)
+  -- memo    : 12c / 18c and  21c test ok
+  /*
+  Copyright DarkAthena(darkathena@qq.com)
+  
+     Licensed under the Apache License, Version 2.0 (the "License");
+     you may not use this file except in compliance with the License.
+     You may obtain a copy of the License at
+  
+         http://www.apache.org/licenses/LICENSE-2.0
+  
+     Unless required by applicable law or agreed to in writing, software
+     distributed under the License is distributed on an "AS IS" BASIS,
+     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+     See the License for the specific language governing permissions and
+     limitations under the License.
+  */
+
+  --cat a file as a varchar2 table 
+  --select * from table(os_file_mgr_pkg.cat_file('XSDDIR','acl.xsd.10.2')); 
+  function cat_file(p_dir varchar2, p_filename varchar2)
+    return ora_mining_varchar2_nt;
+
+  --convert a soft link to real link
+  --select os_file_mgr_pkg.GET_REAL_PATH('DATA_PUMP_DIR') from dual;
+  function get_real_path(p_dir varchar2) return VARCHAR2;
+
+  --remove a os file by full path file name  
+  procedure rm_os_file(i_file_full_name varchar2);
+
+  --run a os commond 
+  procedure os_cmd(i_script varchar2);
+
+  --list dir file as a varchar2 table 
+  --select * from table(os_file_mgr_pkg.get_dir_file_list('/bin'));
+  function get_dir_file_list(i_dir varchar2) return ora_mining_varchar2_nt;
+  
+  --replace directory path (only in a cdb session or non cdb)
+  procedure replace_dir_path_by_real(p_dir varchar2);
+end os_file_mgr_pkg;
+/
+create or replace package body os_file_mgr_pkg is
+
+  function cat_file(p_dir varchar2, p_filename varchar2)
+    return ora_mining_varchar2_nt is
+    L_DIRECTORY_PATH VARCHAR2(4000);
+    str_table        ora_mining_varchar2_nt := ora_mining_varchar2_nt();
+    L_FILE_HANDLE    UTL_FILE.FILE_TYPE;
+    L_LINE           varchar2(4000);
+    line_num         number;
+    pragma autonomous_transaction;
+  begin
+    SELECT DIRECTORY_PATH
+      INTO L_DIRECTORY_PATH
+      FROM DBA_DIRECTORIES H
+     WHERE H.directory_name = p_dir;
+  
+    IF SYS.dbms_db_version.version >= 18 THEN
+      EXECUTE IMMEDIATE ' select * 
+   from external(
+   (filename varchar2(4000 char))
+   type oracle_loader
+   default directory ' || p_dir || '
+   access parameters (
+   records delimited by newline
+   nobadfile nologfile nodiscardfile
+   fields (filename char(4000))
+   )
+   location (''' || p_filename || ''')
+   reject limit unlimited
+  )' BULK COLLECT
+        INTO str_table;
+    ELSE
+      L_FILE_HANDLE := UTL_FILE.FOPEN(p_dir, p_filename, 'r');
+      line_num      := 1;
+      LOOP
+        begin
+          UTL_FILE.GET_LINE(L_FILE_HANDLE, L_LINE);
+        
+          str_table.EXTEND;
+          str_table(line_num) := L_LINE;
+          line_num := line_num + 1;
+        exception
+          when no_data_found then
+            exit;
+        end;
+      END LOOP;
+      UTL_FILE.FCLOSE(L_FILE_HANDLE);
+    END IF;
+    return str_table;
+  end;
+
+  function get_real_path(p_dir varchar2) return VARCHAR2 is
+    L_DIRECTORY_PATH   VARCHAR2(4000);
+    str_table          ora_mining_varchar2_nt;
+    REAL_PATH_FILENAME varchar2(4000);
+    TEMP_DIR           varchar2(4000);
+    pragma autonomous_transaction;
+  begin
+    SELECT DIRECTORY_PATH
+      INTO L_DIRECTORY_PATH
+      FROM DBA_DIRECTORIES H
+     WHERE H.directory_name = p_dir;
+    SELECT DIRECTORY_PATH
+      INTO TEMP_DIR
+      FROM DBA_DIRECTORIES H
+     WHERE H.directory_name = 'DATA_PUMP_DIR';
+  
+    REAL_PATH_FILENAME := dbms_scheduler.generate_job_name(prefix => 'REALPATH');
+    os_cmd('cd ' || L_DIRECTORY_PATH || chr(10) || 'pwd -P > ' || TEMP_DIR || '/' ||
+           REAL_PATH_FILENAME || CHR(10) || 'exit');
+  
+    str_table := cat_file('DATA_PUMP_DIR', REAL_PATH_FILENAME);
+    rm_os_file(TEMP_DIR || '/' || REAL_PATH_FILENAME);
+  
+    return str_table(1);
+  end;
+  procedure replace_dir_path_by_real(p_dir varchar2) is
+    l_real_path      varchar2(4000);
+    L_DIRECTORY_PATH varchar2(4000);
+  begin
+    l_real_path := GET_REAL_PATH(p_dir);
+    SELECT DIRECTORY_PATH
+      INTO L_DIRECTORY_PATH
+      FROM DBA_DIRECTORIES H
+     WHERE H.directory_name = p_dir;
+  
+    if l_real_path is not null and l_real_path <> L_DIRECTORY_PATH then
+      -- execute immediate 'drop directory '||p_dir;
+      execute immediate 'create or replace directory ' || p_dir || ' as ''' ||
+                        l_real_path || '''';
+    
+    end if;
+  end;
+  function file2blob(p_dir varchar2, p_file_name varchar2) return blob is
+    file_lob  bfile;
+    file_blob blob;
+  begin
+    file_lob := bfilename(p_dir, p_file_name);
+    -- IF SYS.dbms_db_version.version < 18 then
+    dbms_lob.open(file_lob, dbms_lob.file_readonly);
+    dbms_lob.createtemporary(file_blob, true);
+    dbms_lob.loadfromfile(file_blob, file_lob, dbms_lob.lobmaxsize);
+    dbms_lob.close(file_lob);
+    -- else
+    -- file_blob := to_blob(file_lob,'text');
+    -- end if;
+    return file_blob;
+  exception
+    when others then
+      if dbms_lob.isopen(file_lob) = 1 then
+        dbms_lob.close(file_lob);
+      end if;
+      if dbms_lob.istemporary(file_blob) = 1 then
+        dbms_lob.freetemporary(file_blob);
+      end if;
+      raise;
+  end;
+
+  procedure os_cmd(i_script varchar2) is
+    sched_job_name varchar2(30);
+  begin
+    sched_job_name := dbms_scheduler.generate_job_name(prefix => 'SCRIPT_');
+    DBMS_SCHEDULER.create_job(job_name            => sched_job_name,
+                              job_type            => 'EXECUTABLE',
+                              job_action          => '/bin/sh',
+                              number_of_arguments => 2,
+                              enabled             => false,
+                              auto_drop           => true);
+    DBMS_SCHEDULER.set_job_argument_value(sched_job_name, 1, '-c');
+    DBMS_SCHEDULER.set_job_argument_value(sched_job_name,
+                                          2,
+                                          i_script || CHR(10) || 'exit'); --add exit 
+    DBMS_SCHEDULER.enable(sched_job_name);
+    DBMS_SCHEDULER.run_job(job_name => sched_job_name);
+  end;
+
+  procedure rm_os_file(i_file_full_name varchar2) is
+  begin
+    os_cmd('rm -rf ' || i_file_full_name);
+  end;
+
+  function get_dir_file_list(i_dir varchar2) return ora_mining_varchar2_nt is
+    str_table     ora_mining_varchar2_nt;
+    filelist_name varchar2(4000);
+    TEMP_DIR      varchar2(4000);
+    pragma autonomous_transaction;
+  begin
+    filelist_name := DBMS_SCHEDULER.generate_job_name('filelist');
+    SELECT DIRECTORY_PATH
+      INTO TEMP_DIR
+      FROM DBA_DIRECTORIES H
+     WHERE H.directory_name = 'DATA_PUMP_DIR';
+    os_cmd('/usr/bin/ls -1 ' || i_dir || ' >' || TEMP_DIR || '/' ||
+           filelist_name);
+    str_table := cat_file('DATA_PUMP_DIR', filelist_name);
+    rm_os_file(TEMP_DIR || '/' || filelist_name);
+  
+    return str_table;
+  end;
+
+end os_file_mgr_pkg;
+/
