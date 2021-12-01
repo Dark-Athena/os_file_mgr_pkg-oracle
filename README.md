@@ -23,9 +23,12 @@ os file operation,solve 18c symlink directory issue(only for linux)
 
   --list dir file as a varchar2 table 
   --像查询一个表一样查询指定目录下的目录名和文件名，输出结果等同于linux命令"ls"
-  --select * from table(os_file_mgr_pkg.get_dir_file_list('/bin'));
+  select * from table(os_file_mgr_pkg.get_dir_file_list('/bin'));
 
   --replace directory path (only in a cdb session or non cdb)
   --使用真实路径重建数据库目录，只能在cdb会话中或者非cdb环境中运行
   procedure replace_dir_path_by_real(p_dir varchar2);
 ```
+![image](https://user-images.githubusercontent.com/25106767/144196084-fad522f0-cc64-42b0-b544-9e807f97150f.png)
+
+
